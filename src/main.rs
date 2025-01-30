@@ -30,7 +30,7 @@ fn main() {
 }
 
 struct TermieGui {
-    buf: String,
+    buf: Vec<u8>,
     fd: File,
 }
 
@@ -41,7 +41,7 @@ impl TermieGui {
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
         TermieGui {
-            buf: String::new(),
+            buf: Vec::new(),
             fd: unsafe { File::from(fd) },
         }
     }
@@ -52,18 +52,15 @@ impl eframe::App for TermieGui {
         let mut buf = vec![0u8; 1024];
         match self.fd.read(&mut buf) {
             Ok(read_size) => {
-                if read_size > 0 {
-                    if let Ok(text) = String::from_utf8(buf[..read_size].to_vec()) {
-                        self.buf.push_str(&text);
-                    }
-                }
+                self.buf.extend_from_slice(&buf[..read_size]);
             }
             Err(e) => {
                 println!("Error: {:?}", e);
             }
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label(&self.buf);
+        egui::CentralPanel::default().show(ctx, |ui| unsafe {
+            // FIXME: breaks something for sure
+            ui.label(std::str::from_utf8_unchecked(&self.buf));
         });
     }
 }
