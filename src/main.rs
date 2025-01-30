@@ -3,7 +3,7 @@ use std::{
     ffi::{CStr, CString},
     fs::File,
     io::Read,
-    os::fd::OwnedFd,
+    os::fd::{AsRawFd, OwnedFd},
 };
 
 fn main() {
@@ -31,18 +31,22 @@ fn main() {
 
 struct TermieGui {
     buf: Vec<u8>,
-    fd: File,
+    fd: OwnedFd,
 }
 
 impl TermieGui {
     fn new(cc: &eframe::CreationContext<'_>, fd: OwnedFd) -> Self {
+        let flags = nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).unwrap();
+        let mut flags = nix::fcntl::OFlag::from_bits_truncate(flags);
+        flags.set(nix::fcntl::OFlag::O_NONBLOCK, true);
+        nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_SETFL(flags)).unwrap();
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
         TermieGui {
             buf: Vec::new(),
-            fd: unsafe { File::from(fd) },
+            fd,
         }
     }
 }
@@ -50,17 +54,20 @@ impl TermieGui {
 impl eframe::App for TermieGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut buf = vec![0u8; 1024];
-        match self.fd.read(&mut buf) {
+        match unsafe { nix::unistd::read(self.fd.as_raw_fd(), &mut buf) } {
             Ok(read_size) => {
                 self.buf.extend_from_slice(&buf[..read_size]);
             }
             Err(e) => {
-                println!("Error: {:?}", e);
+                if e != nix::errno::Errno::EAGAIN {
+                    println!("Error: {:?}", e);
+                }
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| unsafe {
-            // FIXME: breaks something for sure
             ui.label(std::str::from_utf8_unchecked(&self.buf));
         });
+
+        ctx.request_repaint();
     }
 }
