@@ -37,7 +37,8 @@ struct TermieGui {
 impl TermieGui {
     fn new(cc: &eframe::CreationContext<'_>, fd: OwnedFd) -> Self {
         let flags = nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).unwrap();
-        let mut flags = nix::fcntl::OFlag::from_bits_truncate(flags);
+        let mut flags =
+            nix::fcntl::OFlag::from_bits_truncate(flags & nix::fcntl::OFlag::O_ACCMODE.bits());
         flags.set(nix::fcntl::OFlag::O_NONBLOCK, true);
         nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_SETFL(flags)).unwrap();
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
@@ -64,8 +65,24 @@ impl eframe::App for TermieGui {
                 }
             }
         }
-        egui::CentralPanel::default().show(ctx, |ui| unsafe {
-            ui.label(std::str::from_utf8_unchecked(&self.buf));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.input(|input_state| {
+                for event in &input_state.events {
+                    let egui::Event::Text(text) = event else {
+                        continue;
+                    };
+
+                    let bytes = text.as_bytes();
+                    let mut to_write = &bytes[..];
+                    while to_write.len() > 0 {
+                        let written = nix::unistd::write(&self.fd, to_write).unwrap();
+                        to_write = &to_write[written..];
+                    }
+                }
+            });
+            unsafe {
+                ui.label(std::str::from_utf8_unchecked(&self.buf));
+            }
         });
 
         ctx.request_repaint();
