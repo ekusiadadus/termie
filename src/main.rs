@@ -1,6 +1,20 @@
 use eframe::egui;
+use nix::unistd::ForkResult;
+use std::ffi::{CStr, CString};
 
 fn main() {
+    unsafe {
+        let res = nix::pty::forkpty(None, None).unwrap();
+        match res.fork_result {
+            ForkResult::Parent { child } => {
+                println!("Parent: {:?}", child);
+            }
+            ForkResult::Child => {
+                let shell_name = CStr::from_bytes_with_nul(b"ash\0").unwrap();
+                nix::unistd::execvp::<CString>(&shell_name, &[]).expect("Failed to exec");
+            }
+        }
+    }
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "My egui App",

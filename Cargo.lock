@@ -2557,6 +2557,7 @@ name = "termie"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "nix",
 ]
 
 [[package]]
