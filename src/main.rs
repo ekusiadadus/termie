@@ -69,31 +69,40 @@ impl eframe::App for TermieGui {
             ui.input(|input_state| {
                 for event in &input_state.events {
                     let text = match event {
-                        egui::Event::Text(text) => text,
+                        egui::Event::Text(text) => {
+                            println!("Text input: {:?}", text);
+                            text
+                        }
                         egui::Event::Copy | egui::Event::Cut => {
                             continue;
                         }
-                        egui::Event::Key { key, .. } => match key {
-                            egui::Key::Enter => "\n",
-                            egui::Key::Tab => "\t",
-                            egui::Key::Backspace => "\x08",
-                            egui::Key::Delete => "\x7f",
-                            egui::Key::Escape => "\x1b",
-                            egui::Key::Insert => "\x1b[2~",
-                            egui::Key::Home => "\x1b[1~",
-                            egui::Key::End => "\x1b[4~",
-                            egui::Key::PageUp => "\x1b[5~",
-                            egui::Key::PageDown => "\x1b[6~",
-                            egui::Key::ArrowUp => "\x1b[A",
-                            egui::Key::ArrowDown => "\x1b[B",
-                            egui::Key::ArrowRight => "\x1b[C",
-                            egui::Key::ArrowLeft => "\x1b[D",
-                            _ => continue,
-                        },
+                        egui::Event::Key {
+                            key, pressed: true, ..
+                        } => {
+                            println!("Key pressed: {:?}", key);
+                            match key {
+                                egui::Key::Enter => "\n",
+                                egui::Key::Tab => "\t",
+                                egui::Key::Backspace => "\x7f",
+                                egui::Key::Delete => "\x1b[3~",
+                                egui::Key::Escape => "\x1b",
+                                egui::Key::Insert => "\x1b[2~",
+                                egui::Key::Home => "\x1b[1~",
+                                egui::Key::End => "\x1b[4~",
+                                egui::Key::PageUp => "\x1b[5~",
+                                egui::Key::PageDown => "\x1b[6~",
+                                egui::Key::ArrowUp => "\x1b[A",
+                                egui::Key::ArrowDown => "\x1b[B",
+                                egui::Key::ArrowRight => "\x1b[C",
+                                egui::Key::ArrowLeft => "\x1b[D",
+                                _ => continue,
+                            }
+                        }
                         _ => continue,
                     };
 
                     let bytes = text.as_bytes();
+                    println!("Sending bytes: {:?}", bytes);
                     let mut to_write = &bytes[..];
                     while to_write.len() > 0 {
                         let written = nix::unistd::write(&self.fd, to_write).unwrap();
