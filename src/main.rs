@@ -53,8 +53,8 @@ impl TermieGui {
 
 impl eframe::App for TermieGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut buf = vec![0u8; 1024];
-        match unsafe { nix::unistd::read(self.fd.as_raw_fd(), &mut buf) } {
+        let mut buf = vec![0u8; 4096];
+        match nix::unistd::read(self.fd.as_raw_fd(), &mut buf) {
             Ok(read_size) => {
                 self.buf.extend_from_slice(&buf[..read_size]);
             }
