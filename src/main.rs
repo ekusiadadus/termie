@@ -3,7 +3,7 @@ use nix::unistd::ForkResult;
 use std::ffi::{CStr, CString};
 
 fn main() {
-    unsafe {
+    let fd = unsafe {
         let res = nix::pty::forkpty(None, None).unwrap();
         match res {
             nix::pty::ForkptyResult::Parent { child, master } => {
@@ -15,12 +15,12 @@ fn main() {
                 return;
             }
         }
-    }
+    };
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
         "My egui App",
         native_options,
-        Box::new(|cc| Ok(Box::new(TermieGui::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(TermieGui::new(cc)))),
     );
 }
 
