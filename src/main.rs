@@ -15,7 +15,7 @@ fn main() {
                 master
             }
             nix::pty::ForkptyResult::Child => {
-                let shell_name = CStr::from_bytes_with_nul(b"ash\0").unwrap();
+                let shell_name = CStr::from_bytes_with_nul(b"dash\0").unwrap();
                 nix::unistd::execvp::<CString>(&shell_name, &[]).expect("Failed to exec");
                 unreachable!();
             }
