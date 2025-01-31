@@ -1,8 +1,6 @@
 use eframe::egui;
 use std::{
     ffi::{CStr, CString},
-    fs::File,
-    io::Read,
     os::fd::{AsRawFd, OwnedFd},
 };
 
@@ -22,8 +20,8 @@ fn main() {
         }
     };
     let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "My egui App",
+    let _ = eframe::run_native(
+        "Termie",
         native_options,
         Box::new(move |cc| Ok(Box::new(TermieGui::new(cc, fd)))),
     );
