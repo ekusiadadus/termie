@@ -19,13 +19,11 @@ fn get_character_size(ctx: &egui::Context) -> (f32, f32) {
 
 fn character_to_cursor_offset(
     character_size: (f32, f32),
-    character_pos: (usize, usize),
-    _content: &[u8],
+    cursor_pos: (usize, usize),
 ) -> (f32, f32) {
-    // character_pos.0: 行番号, character_pos.1: 列番号
     (
-        character_size.0 * character_pos.1 as f32,
-        character_size.1 * character_pos.0 as f32,
+        character_size.0 * cursor_pos.1 as f32,
+        character_size.1 * cursor_pos.0 as f32,
     )
 }
 
@@ -44,6 +42,7 @@ fn main() {
             }
         }
     };
+
     let native_options = eframe::NativeOptions::default();
     let _ = eframe::run_native(
         "Termie",
@@ -54,7 +53,7 @@ fn main() {
 
 struct TermieGui {
     buf: Vec<u8>,
-    cursor_pos: (usize, usize),
+    cursor_pos: (usize, usize), // (行, 列)
     character_size: Option<(f32, f32)>,
     fd: OwnedFd,
 }
@@ -64,6 +63,7 @@ impl TermieGui {
         cc.egui_ctx.style_mut(|style| {
             style.override_text_style = Some(egui::TextStyle::Monospace);
         });
+        // 非同期読み出しの設定
         let flags = nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).unwrap();
         let mut flags =
             nix::fcntl::OFlag::from_bits_truncate(flags & nix::fcntl::OFlag::O_ACCMODE.bits());
@@ -84,29 +84,31 @@ impl eframe::App for TermieGui {
         if self.character_size.is_none() {
             self.character_size = Some(get_character_size(ctx));
         }
-        let mut buf = vec![0u8; 4096];
-        match nix::unistd::read(self.fd.as_raw_fd(), &mut buf) {
+        let mut read_buf = [0u8; 4096];
+        match nix::unistd::read(self.fd.as_raw_fd(), &mut read_buf) {
             Ok(read_size) => {
-                let incoming = &buf[..read_size];
-                for c in incoming {
+                let incoming = &read_buf[..read_size];
+                for &c in incoming {
                     match c {
-                        // 0x08: backspace
-                        0x08 => {
+                        // Backspace: 0x08 または 0x7f
+                        0x08 | 0x7f => {
                             if self.cursor_pos.1 > 0 {
+                                self.buf.pop();
                                 self.cursor_pos.1 -= 1;
                             }
                         }
-                        // 0x0a: newline
+                        // 改行
                         0x0a => {
+                            self.buf.push(c);
                             self.cursor_pos.0 += 1;
                             self.cursor_pos.1 = 0;
                         }
                         _ => {
+                            self.buf.push(c);
                             self.cursor_pos.1 += 1;
                         }
                     }
                 }
-                self.buf.extend_from_slice(&buf[..read_size]);
             }
             Err(e) => {
                 if e != nix::errno::Errno::EAGAIN {
@@ -114,6 +116,7 @@ impl eframe::App for TermieGui {
                 }
             }
         }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.input(|input_state| {
                 for event in &input_state.events {
@@ -152,18 +155,19 @@ impl eframe::App for TermieGui {
                     println!("Sending bytes: {:?}", bytes);
                     let mut to_write = bytes;
                     while !to_write.is_empty() {
+                        // 修正: self.fd.as_raw_fd() -> &self.fd
                         let written = nix::unistd::write(&self.fd, to_write).unwrap();
                         to_write = &to_write[written..];
                     }
                 }
             });
-            // ラベルの左上を基準にカーソルを描画
-            let response = unsafe { ui.label(std::str::from_utf8_unchecked(&self.buf)) };
+
+            let text = std::str::from_utf8(&self.buf).unwrap_or("<Invalid UTF-8>");
+            let response = ui.label(text);
             let top_left = response.rect.min;
             let painter = ui.painter();
             let character_size = self.character_size.unwrap();
-            let cursor_offset =
-                character_to_cursor_offset(character_size, self.cursor_pos, &self.buf);
+            let cursor_offset = character_to_cursor_offset(character_size, self.cursor_pos);
             painter.rect_filled(
                 egui::Rect::from_min_size(
                     egui::Pos2::new(top_left.x + cursor_offset.0, top_left.y + cursor_offset.1),
