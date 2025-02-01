@@ -4,6 +4,31 @@ use std::{
     os::fd::{AsRawFd, OwnedFd},
 };
 
+fn get_character_size(ctx: &egui::Context) -> (f32, f32) {
+    let font_id = ctx.style().text_styles[&egui::TextStyle::Monospace].clone();
+    ctx.fonts(|fonts| {
+        let layout = fonts.layout(
+            "@".to_string(),
+            font_id,
+            egui::Color32::default(),
+            f32::INFINITY,
+        );
+        (layout.rect.width(), layout.rect.height())
+    })
+}
+
+fn character_to_cursor_offset(
+    character_size: (f32, f32),
+    character_pos: (usize, usize),
+    _content: &[u8],
+) -> (f32, f32) {
+    // character_pos.0: 行番号, character_pos.1: 列番号
+    (
+        character_size.0 * character_pos.1 as f32,
+        character_size.1 * character_pos.0 as f32,
+    )
+}
+
 fn main() {
     let fd = unsafe {
         let res = nix::pty::forkpty(None, None).unwrap();
@@ -29,22 +54,26 @@ fn main() {
 
 struct TermieGui {
     buf: Vec<u8>,
+    cursor_pos: (usize, usize),
+    character_size: Option<(f32, f32)>,
     fd: OwnedFd,
 }
 
 impl TermieGui {
     fn new(cc: &eframe::CreationContext<'_>, fd: OwnedFd) -> Self {
+        cc.egui_ctx.style_mut(|style| {
+            style.override_text_style = Some(egui::TextStyle::Monospace);
+        });
         let flags = nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).unwrap();
         let mut flags =
             nix::fcntl::OFlag::from_bits_truncate(flags & nix::fcntl::OFlag::O_ACCMODE.bits());
         flags.set(nix::fcntl::OFlag::O_NONBLOCK, true);
         nix::fcntl::fcntl(fd.as_raw_fd(), nix::fcntl::FcntlArg::F_SETFL(flags)).unwrap();
-        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
-        // Restore app state using cc.storage (requires the "persistence" feature).
-        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
-        // for e.g. egui::PaintCallback.
+
         TermieGui {
             buf: Vec::new(),
+            cursor_pos: (0, 0),
+            character_size: None,
             fd,
         }
     }
@@ -52,9 +81,31 @@ impl TermieGui {
 
 impl eframe::App for TermieGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.character_size.is_none() {
+            self.character_size = Some(get_character_size(ctx));
+        }
         let mut buf = vec![0u8; 4096];
         match nix::unistd::read(self.fd.as_raw_fd(), &mut buf) {
             Ok(read_size) => {
+                let incoming = &buf[..read_size];
+                for c in incoming {
+                    match c {
+                        // 0x08: backspace
+                        0x08 => {
+                            if self.cursor_pos.1 > 0 {
+                                self.cursor_pos.1 -= 1;
+                            }
+                        }
+                        // 0x0a: newline
+                        0x0a => {
+                            self.cursor_pos.0 += 1;
+                            self.cursor_pos.1 = 0;
+                        }
+                        _ => {
+                            self.cursor_pos.1 += 1;
+                        }
+                    }
+                }
                 self.buf.extend_from_slice(&buf[..read_size]);
             }
             Err(e) => {
@@ -71,9 +122,7 @@ impl eframe::App for TermieGui {
                             println!("Text input: {:?}", text);
                             text
                         }
-                        egui::Event::Copy | egui::Event::Cut => {
-                            continue;
-                        }
+                        egui::Event::Copy | egui::Event::Cut => continue,
                         egui::Event::Key {
                             key, pressed: true, ..
                         } => {
@@ -101,16 +150,28 @@ impl eframe::App for TermieGui {
 
                     let bytes = text.as_bytes();
                     println!("Sending bytes: {:?}", bytes);
-                    let mut to_write = &bytes[..];
-                    while to_write.len() > 0 {
+                    let mut to_write = bytes;
+                    while !to_write.is_empty() {
                         let written = nix::unistd::write(&self.fd, to_write).unwrap();
                         to_write = &to_write[written..];
                     }
                 }
             });
-            unsafe {
-                ui.label(std::str::from_utf8_unchecked(&self.buf));
-            }
+            // ラベルの左上を基準にカーソルを描画
+            let response = unsafe { ui.label(std::str::from_utf8_unchecked(&self.buf)) };
+            let top_left = response.rect.min;
+            let painter = ui.painter();
+            let character_size = self.character_size.unwrap();
+            let cursor_offset =
+                character_to_cursor_offset(character_size, self.cursor_pos, &self.buf);
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::Pos2::new(top_left.x + cursor_offset.0, top_left.y + cursor_offset.1),
+                    egui::Vec2::new(character_size.0, character_size.1),
+                ),
+                0.0,
+                egui::Color32::GRAY,
+            );
         });
 
         ctx.request_repaint();
